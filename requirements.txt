@@ -1,0 +1,6 @@
+accelerate
+qwen-vl-utils
+pillow
+pandas
+openpyxl
+numpy
