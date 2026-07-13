@@ -1,0 +1,17 @@
+Bootstrap: localimage
+From: vllm-openai.sif
+
+%files
+    requirements.txt /app/requirements.txt
+    src /app/src
+
+%post
+    cd /app
+    pip install --no-cache-dir -r requirements.txt
+
+%environment
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    cd /app
+    python3 src/run_pipeline.py "$@"
