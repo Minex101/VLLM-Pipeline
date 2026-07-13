@@ -8,7 +8,7 @@ import csv
 GT_PATH = "./dataset/dataset.xlsx"
 IMAGE_PATH = "./dataset/"
 OUTPUT_PATH = "./results.csv"
-MODEL = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+MODEL = "Qwen/Qwen2.5-VL-72B-Instruct-AWQ"
 
 # Prompt
 PROMPT_TEXT = (
@@ -18,8 +18,7 @@ PROMPT_TEXT = (
     "1. Identify the object's category and material.\n"
     "2. Check specifically: is this a case, cover, sleeve, headphone, cable, sticker, card, or other thin/flat item? "
     "If yes, its height/thickness is almost certainly under 3cm, often under 1cm, do not estimate height like a 3D bulky object.\n"
-    "3. Estimate length and width by comparing to a known reference: a credit card is 8.5 x 5.4cm, "
-    "a smartphone is ~15cm tall, a soda can is ~12cm tall and ~6.6cm wide.\n"
+    "3. Estimate length and width by comparing to a known reference\n"
     "4. Estimate weight independently, based on the object's category and typical real-world weight for that "
     "type of product (not solely derived from your size estimate), small accessories are often under 100g, "
     "kitchen/large items can be 500g-3000g+.\n\n"
@@ -35,9 +34,11 @@ class EstimatorPipeline:
         self.model_name = model_name
         self.llm = LLM(
             model=model_name,
+            tensor_parallel_size=2,
             max_model_len=16384,
             gpu_memory_utilization=0.85,
             limit_mm_per_prompt={"image": 1, "video": 0},
+            enforce_eager=True
         )
 
         self.processor = AutoProcessor.from_pretrained(model_name)
