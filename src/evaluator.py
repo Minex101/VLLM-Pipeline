@@ -100,7 +100,6 @@ def main():
         print(f"  MAE:          {mean(abs_err):.2f}")
         print(f"  Median AE:    {median(abs_err):.2f}")
         print(f"  MAPE:         {mean(pct_err):.2f}%")
-        # print(f"  Median MAPE:  {median(pct_err):.2f}%")
 
 if __name__ == "__main__":
     main()

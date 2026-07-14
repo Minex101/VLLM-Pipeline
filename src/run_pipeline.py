@@ -8,24 +8,17 @@ import csv
 GT_PATH = "./dataset/dataset.xlsx"
 IMAGE_PATH = "./dataset/"
 OUTPUT_PATH = "./results.csv"
-MODEL = "Qwen/Qwen2.5-VL-72B-Instruct-AWQ"
 
-# Prompt
-PROMPT_TEXT = (
-    "You are an expert product analyst who estimates real-world object "
-    "properties from images with high accuracy.\n\n"
-    "Silently think through these steps before answering (do not show your reasoning):\n"
-    "1. Identify the object's category and material.\n"
-    "2. Check specifically: is this a case, cover, sleeve, headphone, cable, sticker, card, or other thin/flat item? "
-    "If yes, its height/thickness is almost certainly under 3cm, often under 1cm, do not estimate height like a 3D bulky object.\n"
-    "3. Estimate length and width by comparing to a known reference\n"
-    "4. Estimate weight independently, based on the object's category and typical real-world weight for that "
-    "type of product (not solely derived from your size estimate), small accessories are often under 100g, "
-    "kitchen/large items can be 500g-3000g+.\n\n"
-    "You MUST give a specific numeric estimate. Never refuse or say it cannot be determined. "
-    "Do not default to generic 'average' sizes, commit to a specific estimate based on what you actually see.\n\n"
-    "Respond with ONLY numbers separated by commas, nothing else, no units, no words, no reasoning shown, "
-    "in this exact order: weight_g,length_cm,width_cm,height_cm"
+# -- MODELS -- 
+MODEL = "Qwen/Qwen2.5-VL-72B-Instruct-AWQ" # Use the Qwen_sif img
+# MODEL = "OpenGVLab/InternVL2_5-26B" # Use the Qwen_sif img
+
+# -- PROMPTS -- 
+PROMPT_TEXT = ( # Zero Shot Prompt (Baseline)
+    "Look at this product image. Estimate the object's weight in grams and its "
+    "largest dimension in centimeters. Give each as a min-max range.\n\n"
+    "Respond with ONLY numbers separated by commas, in this exact order: "
+    "weight_min_g,weight_max_g,largest_dim_min_cm,largest_dim_max_cm"
 )
 
 class EstimatorPipeline:
@@ -35,16 +28,20 @@ class EstimatorPipeline:
         self.llm = LLM(
             model=model_name,
             tensor_parallel_size=2,
-            max_model_len=16384,
+            max_model_len=8192,
             gpu_memory_utilization=0.85,
             limit_mm_per_prompt={"image": 1, "video": 0},
-            enforce_eager=True
+            enforce_eager=True,
+            # trust_remote_code=True # True; for InternVL Model
         )
 
-        self.processor = AutoProcessor.from_pretrained(model_name)
-        self.sampling_params = SamplingParams(temperature=0, max_tokens=200)
+        self.processor = AutoProcessor.from_pretrained(
+            model_name,
+            # trust_remote_code=True # True; for InternVL Model
+        )
+        self.sampling_params = SamplingParams(temperature=0, max_tokens=80)
     
-    def build_prompt(self):
+    def build_prompt(self): # Enable for Qwen Model
         messages = [
             {
                 "role": "user",
@@ -57,20 +54,34 @@ class EstimatorPipeline:
         return self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-    
-    def estimate(self, image_path):
-        image = Image.open(image_path).convert("RGB")
-        prompt = self.build_prompt()
 
-        outputs = self.llm.generate(
-            {"prompt": prompt, "multi_modal_data": {"image": image}},
-            self.sampling_params,
-        )
-        return outputs[0].outputs[0].text.strip()
+    # def build_prompt(self):  # Enable for InternVL Model
+    #     messages = [
+    #         {
+    #             "role": "user",
+    #             "content": "<image>\n" + PROMPT_TEXT
+    #         }
+    #     ]
+
+    #     return self.processor.apply_chat_template(
+    #         messages,
+    #         tokenize=False,
+    #         add_generation_prompt=True
+    #     )
+    
+    def estimate_batch(self, image_paths):
+        inputs = []
+        for path in image_paths:
+            image = Image.open(path).convert("RGB")
+            prompt = self.build_prompt()
+            inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
+
+        outputs = self.llm.generate(inputs, self.sampling_params)
+        return [o.outputs[0].text.strip() for o in outputs]
     
 def get_image_name(ws):
     image_names = []
-    for row in ws.iter_rows(min_col=6, max_col=6, min_row=4, max_row=100, values_only=True):
+    for row in ws.iter_rows(min_col=6, max_col=6, min_row=4, max_row=5, values_only=True):
         image_names.append(row[0])
     return image_names
 
@@ -85,22 +96,31 @@ def main():
     # Get the image names to open the image and predict
     image_names = get_image_name(ws)
 
-    # Loop through and get the predictions
+    image_paths = [IMAGE_PATH + name for name in image_names]
+    results = pipeline.estimate_batch(image_paths)
+
     combined_results = []
-    for idx, name in enumerate(image_names):
-        print(f"[{idx}/{len(image_names)}] Processing {name}...")
-        result = pipeline.estimate(IMAGE_PATH + name)
-        weight, length, width, height = result.split(",")
+    for name, result in zip(image_names, results):
+        w_min, w_max, d_min, d_max = result.split(",")
         combined_results.append({
             "image_name": name,
-            "weight_g": weight.strip(),
-            "length_cm": length.strip(),
-            "width_cm": width.strip(),
-            "height_cm": height.strip(),
+            "weight_min_g": w_min.strip(),
+            "weight_max_g": w_max.strip(),
+            "largest_dim_min_cm": d_min.strip(),
+            "largest_dim_max_cm": d_max.strip(),
         })
 
     with open(OUTPUT_PATH, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["image_name", "weight_g", "length_cm", "width_cm", "height_cm"])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "image_name",
+                "weight_min_g",
+                "weight_max_g",
+                "largest_dim_min_cm",
+                "largest_dim_max_cm",
+            ],
+        )
         writer.writeheader()
         writer.writerows(combined_results)
 
